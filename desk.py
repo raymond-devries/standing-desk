@@ -1,3 +1,4 @@
+import logging
 import sys
 from logging import info, warning
 from signal import signal, SIGINT
@@ -48,16 +49,13 @@ class DeskLeg:
         return f"Leg ({self.identifier}) set to {self.height}. Sensor reading: {self.read_sensor()}"
 
     def start_leg(self, direction):
-        pass
+        self.arduino_connection.send_message(self.identifier, direction)
 
     def stop_leg(self):
-        pass
+        self.arduino_connection.send_message(self.identifier, 0)
 
     def read_sensor(self) -> float:
         return self.lidar_connection.get_distance()
-
-    def reset(self):
-        pass
 
 
 class Desk:
@@ -88,8 +86,16 @@ class Desk:
         ]
 
     def on_message(self, client, userdata, msg):
-        height = int(msg.payload.decode("ASCII"))
-        self.set_leg_heights(height)
+        message = msg.payload.decode("ASCII")
+        logging.info(f"MQTT message: {message}")
+        if message == "up":
+            self.max(UP)
+        elif message == "down":
+            self.max(DOWN)
+        elif message.isnumeric():
+            self.set_leg_heights(int(message))
+        else:
+            logging.warning(f"Invalid MQTT message {message}")
 
     def set_leg_heights(self, height: int):
         if height == self.overall_height:
@@ -105,10 +111,18 @@ class Desk:
 
         if not all_equal(directions):
             warning("Directions of Desk legs were different, resetting.")
-            [leg.reset() for leg in self.desk_motors]
+            self.max(DOWN)
         else:
             tasks = [leg.move_legs() for leg in self.desk_motors]
-            [info(task.result()) for task in tasks]
+            for task in tasks:
+                print(task.result())
+
+    def max(self, direction):
+        for leg in self.desk_motors:
+            leg.start_leg(direction)
+        sleep(120)
+        for leg in self.desk_motors:
+            leg.stop_leg()
 
     def _sigint_handler(self, signal_received, frame):
         info("Shutting down desk service")
